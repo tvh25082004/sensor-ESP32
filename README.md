@@ -240,17 +240,20 @@ Pseudo-flow (rút gọn):
 
 ```mermaid
 flowchart TD
-    A[Start main()] --> B[get_firebase_data()]
-    B --> C[backup_firebase(df)]
-    C --> D{df empty?}
-    D -- Yes --> E[Log 'no data' and sleep] --> B
-    D -- No --> F[detect_anomaly(df)]
-    F --> G{anomalies?}
-    G -- Yes --> H[print anomalies] --> I[send_alert(...)]
-    G -- No --> J[print 'normal']
-    I --> K[forecast_with_trend(...)]
+    A[Start main] --> B[get_firebase_data]
+    B --> C[backup_firebase]
+    C --> D{has data}
+    D -->|no| E[log no data and sleep]
+    E --> B
+    D -->|yes| F[detect_anomaly]
+    F --> G{has anomalies}
+    G -->|yes| H[print anomalies]
+    H --> I[send_alert]
+    G -->|no| J[print normal]
+    I --> K[forecast_with_trend]
     J --> K
-    K --> L[sleep and loop] --> B
+    K --> L[sleep and loop]
+    L --> B
 ```
 
 ### 3.3. Các bước chính
