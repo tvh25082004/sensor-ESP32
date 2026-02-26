@@ -24,35 +24,25 @@ Project này triển khai một hệ thống đo và giám sát chất lượng 
 
 ```mermaid
 flowchart LR
-    subgraph Edge_Device[ESP32 + TFT]
-        SENSORS[DHT22<br/>MQ135<br/>MQ7<br/>GP2Y]
-        MCU[ESP32 Firmware<br/>(PlatformIO / Arduino)]
-        TFT[TFT_eSPI Display]
+    subgraph Edge_Device["ESP32 + TFT"]
+        SENSORS["DHT22 / MQ135 / MQ7 / GP2Y"]
+        MCU["ESP32 firmware (PlatformIO / Arduino)"]
+        TFT["TFT_eSPI display"]
     end
 
-    subgraph Cloud[Firebase]
-        DB[(Realtime Database<br/>sensor_data)]
+    subgraph Cloud["Firebase"]
+        DB["Realtime Database\nsensor_data"]
     end
 
-    subgraph AI_Service[Python AI Service]
-        PY[backup_air_data.py<br/>ECOD + Prophet]
-        BK[backup.json]
+    subgraph AI_Service["Python AI service"]
+        PY["backup_air_data.py\nECOD + Prophet"]
     end
 
     SENSORS --> MCU
     MCU --> TFT
-    MCU -- PUT JSON --> DB
-    DB -- HTTP GET --> PY
-    PY --> BK
-    PY -- HTTP POST /alert --> MCU
-
-    classDef edge fill:#003f5c,stroke:#fff,color:#fff;
-    classDef cloud fill:#58508d,stroke:#fff,color:#fff;
-    classDef ai fill:#bc5090,stroke:#fff,color:#fff;
-
-    class Edge_Device edge;
-    class Cloud cloud;
-    class AI_Service ai;
+    MCU --> DB
+    DB --> PY
+    PY --> MCU
 ```
 
 ---
@@ -155,66 +145,19 @@ void loop()
 
 ### 2.3. Đo cảm biến – `sensor.cpp / sensor.h`
 
-Các chân kết nối (theo mã):
-- **DHT22**: `DHTPIN 16`
-- **MQ135 (NH3)**: `MQ135_PIN 34` (ADC, attenuation 11 dB)
-- **MQ7 (CO)**: `MQ7_PIN 32`
-- **GP2Y (bụi)**:
-  - ADC: `GP2Y_ADC 33`
-  - LED: `GP2Y_LED 13`
+- **Chân kết nối (theo mã)**:
+  - DHT22: `DHTPIN 16`
+  - MQ135 (NH3): `MQ135_PIN 34`
+  - MQ7 (CO): `MQ7_PIN 32`
+  - GP2Y (bụi): `GP2Y_ADC 33`, LED điều khiển: `GP2Y_LED 13`
+- **Biến dùng chung giữa các module**:
+  - `float temp, humi, co_ppm, nh3_ppm, dust;`
 
-Các biến toàn cục (dùng chung giữa sensor, display, firebase):
-- `float temp, humi, co_ppm, nh3_ppm, dust;`
-
-#### 2.3.1. DHT22
-- `DHT22_init()`:
-  - `dht.begin();`
-- `DHT22_run()`:
-  - `humi = dht.readHumidity();`
-  - `temp = dht.readTemperature();`
-
-#### 2.3.2. MQ135 – ước lượng NH3
-
-- Đọc ADC nhiều mẫu, lấy trung bình:
-  - `analogRead(MQ135_PIN)` lặp `samples = 10` lần.
-  - Chuyển sang điện áp: \( V_{out} = \frac{ADC}{4095} \times 3.3V \).
-- Tính điện trở cảm biến:
-  - \( R_s = R_L \times \frac{V_{CC} - V_{out}}{V_{out}} \), với `RL = 10kΩ`, `VCC = 5V`.
-- Chuyển Rs/R0 sang ppm theo đường cong log-log (xấp xỉ từ datasheet):
-  - Dùng hệ số:
-    - `M_NH3 = -0.48`
-    - `B_NH3 = 0.35`
-  - Công thức:
-    - \( \log_{10}(\text{ppm}) = \frac{\log_{10}(Rs/R0) - B}{M} \)
-    - \( \text{ppm} = 10^{\left( \frac{\log_{10}(Rs/R0) - B}{M} \right)} \)
-- Kết quả lưu vào `nh3_ppm`.
-
-#### 2.3.3. MQ7 – ước lượng CO
-
-- Điện trở Rs từ ADC:
-  - \( V = \frac{ADC}{4095} \times 3.3V \)
-  - \( R_s = (3.3 - V) \times \frac{R_L}{V} \), với `RL_7 = 10kΩ`.
-- Chuyển Rs/R0 sang ppm:
-  - Hệ số:
-    - `m = -0.77`
-    - `b = 1.699`
-  - \( \log_{10}(\text{ppm}) = \frac{\log_{10}(Rs/R0) - b}{m} \)
-- Kết quả lưu vào `co_ppm`.
-
-#### 2.3.4. GP2Y – bụi
-
-- Trong vòng lặp 100 lần:
-  - Điều khiển IR LED:
-    - `digitalWrite(GP2Y_LED, LOW);` – bật LED.
-    - Delay micro giây để ổn định, đọc ADC `voMeasured = analogRead(GP2Y_ADC);`
-    - `digitalWrite(GP2Y_LED, HIGH);` – tắt LED, nghỉ.
-  - Chuyển điện áp (hiện đang dùng hệ số 5.0/1024.0 – tương đương thang đo ban đầu của GP2Y):
-    - `calcVoltage = voMeasured * (5.0 / 1024.0);`
-  - Chuyển sang mật độ bụi:
-    - `dustDensity = 0.17 * calcVoltage - 0.1;` (mô hình tuyến tính từ datasheet).
-  - Cộng dồn `sumDust`.
-- Sau vòng lặp:
-  - Bình quân, đổi ra mg/m³ rồi µg/m³, lấy giá trị tuyệt đối cho `dust`.
+Tóm tắt xử lý:
+- DHT22: đọc trực tiếp `temperature`, `humidity` và gán vào `temp`, `humi`.
+- MQ135: đọc ADC nhiều mẫu, đổi ra điện áp, suy ra điện trở cảm biến, sau đó nội suy theo đường cong datasheet để ước lượng `nh3_ppm`.
+- MQ7: tương tự MQ135, dùng hệ số khác để ước lượng `co_ppm`.
+- GP2Y: điều khiển LED, đọc ADC trong nhiều chu kỳ ngắn, tính điện áp và chuyển sang mật độ bụi, quy đổi ra `dust` (µg/m³).
 
 ### 2.4. Hiển thị TFT – `display.cpp / display.h`
 
@@ -293,74 +236,39 @@ Script này **không chạy trên ESP32**, mà chạy trên PC/server, dùng `re
 
 ### 3.2. Luồng chính `main()`
 
-Pseudo-flow:
+Pseudo-flow (rút gọn):
 
 ```mermaid
 flowchart TD
     A[Start main()] --> B[get_firebase_data()]
     B --> C[backup_firebase(df)]
     C --> D{df empty?}
-    D -- Yes --> E[Print 'No data yet' & sleep 10 min] --> B
+    D -- Yes --> E[Log 'no data' and sleep] --> B
     D -- No --> F[detect_anomaly(df)]
     F --> G{anomalies?}
-    G -- Yes --> H[print anomalies] --> I[send_alert(anomalies, latest_row)]
-    G -- No --> J[print 'Data normal']
-    I --> K[Forecast & trend per metric]
+    G -- Yes --> H[print anomalies] --> I[send_alert(...)]
+    G -- No --> J[print 'normal']
+    I --> K[forecast_with_trend(...)]
     J --> K
-    K --> L[sleep 10 min] --> B
+    K --> L[sleep and loop] --> B
 ```
 
 ### 3.3. Các bước chính
 
-- **Lấy dữ liệu từ Firebase** – `get_firebase_data()`:
-  - GET `FIREBASE_URL`.
-  - Bỏ qua key `_last_backup` nếu có.
-  - Parse `time` về `datetime`, build `DataFrame` có cột `timestamp`, `temp`, `humi`, `co`, `nh3`, `dust`.
-  - Sort theo thời gian tăng dần.
-- **Backup** – `backup_firebase(df)`:
-  - Nếu `df.empty` → backup `{}` + `_last_backup`.
-  - Nếu có dữ liệu:
-    - Chuyển `timestamp` sang string `"%Y-%m-%d %H:%M:%S"`.
-    - Set `timestamp` làm index, export sang dict rồi ghi `backup.json`.
-- **Phát hiện bất thường** – `detect_anomaly(df)`:
-  - Yêu cầu tối thiểu 10 record.
-  - Dùng các cột `["temp", "humi", "co", "nh3", "dust"]` làm feature.
-  - Train `ECOD()` trên toàn bộ dữ liệu.
-  - `is_anomaly = clf.labels_[-1]` – xem bản ghi mới nhất có bị đánh dấu bất thường đa biến không.
-  - Áp thêm ngưỡng cố định (giống ESP) để thêm cảnh báo cụ thể từng biến.
-  - Trả về:
-    - `anomalies` – danh sách chuỗi cảnh báo.
-    - `latest` – bản ghi mới nhất.
-- **Dự báo 1–6 giờ + xu hướng** – `forecast_with_trend(df, col)`:
-  - Chuẩn bị dữ liệu Prophet:
-    - Cột `ds` = `timestamp`.
-    - Cột `y` = log-transform `np.log(y + 1)` để ổn định mô hình.
-  - Fit Prophet với `daily_seasonality=True`.
-  - Tạo future 6h (`periods=6, freq='h'`).
-  - Dự báo → `yhat`, convert ngược: `exp(yhat) - 1` và lấy giá trị dương.
-  - Lấy 6 điểm cuối cùng để in forecast.
-  - Xác định xu hướng:
-    - `↑ increasing` nếu `yhat cuối > yhat đầu`.
-    - `↓ decreasing` nếu `yhat cuối < yhat đầu`.
-    - `→ stable` nếu gần như bằng nhau.
-- **Gửi cảnh báo về ESP32** – `send_alert(anomalies, latest)`:
-  - Payload dạng:
-    ```json
-    {
-      "type": "anomaly",
-      "time": "...",
-      "anomalies": ["...", "..."],
-      "row": {
-        "temp": ...,
-        "humi": ...,
-        "co": ...,
-        "nh3": ...,
-        "dust": ...
-      }
-    }
-    ```
-  - Gửi POST `ESP32_HTTP` với `json=payload`.
-  - ESP32 nhận trong `AI_Start()` và push vào `receivedAlerts[]` để hiển thị.
+- **Lấy & backup dữ liệu**:
+  - Hàm `get_firebase_data()` đọc toàn bộ `sensor_data` từ Firebase, sort theo thời gian.
+  - Hàm `backup_firebase(df)` lưu snapshot mới nhất vào `backup.json` (kèm `_last_backup`).
+- **Phát hiện bất thường**:
+  - `detect_anomaly(df)` dùng cả:
+    - Ngưỡng cố định cho từng biến (`THRESHOLDS`).
+    - Mô hình ECOD (PyOD) để phát hiện bất thường đa biến trên điểm mới nhất.
+  - Trả về danh sách `anomalies` (chuỗi mô tả) và bản ghi `latest_row`.
+- **Dự báo & xu hướng**:
+  - `forecast_with_trend(df, col)` huấn luyện Prophet trên chuỗi thời gian từng biến.
+  - Dự báo 6 điểm tiếp theo (6 giờ) và suy ra xu hướng tăng / giảm / ổn định.
+- **Gửi cảnh báo về ESP32**:
+  - `send_alert(anomalies, latest_row)` đóng gói JSON gồm loại cảnh báo, thời gian và giá trị đo.
+  - Gửi HTTP POST tới `/alert` trên ESP32; firmware nhận và hiển thị trên TFT qua `receivedAlerts[]`.
 
 ---
 
