@@ -6,36 +6,75 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 import requests
+from influxdb_client import InfluxDBClient
 from prophet import Prophet
 from pyod.models.ecod import ECOD
 
-# ==== Cấu hình (lấy từ biến môi trường, có default) ====
-FIREBASE_URL = os.getenv(
-    "FIREBASE_URL",
-    "https://nckh-clkk-default-rtdb.asia-southeast1.firebasedatabase.app/sensor_data.json",
-)
-ESP32_HTTP = os.getenv("ESP32_HTTP", "http://192.168.1.17/alert")  # IP ESP32 thực tế
-BACKUP_FILE = os.getenv("BACKUP_FILE", "backup.json")
+# ==== Cấu hình InfluxDB (lấy từ biến môi trường) ====
+INFLUX_URL   = os.getenv("INFLUX_URL",   "http://localhost:8086")
+INFLUX_TOKEN = os.getenv("INFLUX_TOKEN", "my-super-secret-token")
+INFLUX_ORG   = os.getenv("INFLUX_ORG",  "iot")
+INFLUX_BUCKET= os.getenv("INFLUX_BUCKET","sensor_data")
+
+# Cấu hình ESP32 HTTP để gửi alert
+ESP32_HTTP    = os.getenv("ESP32_HTTP",   "http://192.168.1.17/alert")
+BACKUP_FILE   = os.getenv("BACKUP_FILE",  "backup.json")
 POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "600"))  # giây, mặc định 10 phút
 
 # ==== Ngưỡng cảnh báo ====
 THRESHOLDS = {
-    "temp": 35.0,
+    "temp":     35.0,
     "humi_low": 30.0,
-    "humi_high": 90.0,
-    "co": 12.5,
-    "nh3": 20.0,
-    "dust": 35.0  # µg/m3
+    "humi_high":90.0,
+    "co":       12.5,
+    "nh3":      20.0,
+    "dust":     35.0   # µg/m3
 }
 
-# ==== Backup Firebase ====
-def backup_firebase(df):
+# ==== Lấy dữ liệu từ InfluxDB ====
+def get_influx_data(hours: int = 24) -> pd.DataFrame:
+    """Query dữ liệu cảm biến từ InfluxDB trong khoảng `hours` giờ gần nhất."""
+    client = InfluxDBClient(url=INFLUX_URL, token=INFLUX_TOKEN, org=INFLUX_ORG)
+    query_api = client.query_api()
+
+    flux = f'''
+from(bucket: "{INFLUX_BUCKET}")
+  |> range(start: -{hours}h)
+  |> filter(fn: (r) => r["_measurement"] == "mqtt_consumer")
+  |> filter(fn: (r) => r["_field"] == "temp" or r["_field"] == "humi"
+        or r["_field"] == "co" or r["_field"] == "nh3" or r["_field"] == "dust")
+  |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
+  |> sort(columns: ["_time"])
+'''
+    try:
+        tables = query_api.query_data_frame(flux)
+        client.close()
+        if tables is None or (isinstance(tables, list) and len(tables) == 0):
+            return pd.DataFrame()
+        if isinstance(tables, list):
+            df = pd.concat(tables, ignore_index=True)
+        else:
+            df = tables
+        # Giữ các cột cần thiết
+        cols = [c for c in ["_time", "temp", "humi", "co", "nh3", "dust"] if c in df.columns]
+        df = df[cols].rename(columns={"_time": "timestamp"})
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        df.sort_values("timestamp", inplace=True)
+        df.reset_index(drop=True, inplace=True)
+        return df
+    except Exception as e:
+        print("⚠️ InfluxDB error:", e)
+        client.close()
+        return pd.DataFrame()
+
+
+# ==== Backup dữ liệu ra file JSON ====
+def backup_data(df: pd.DataFrame):
     try:
         if df.empty:
             data = {}
         else:
             df_copy = df.copy()
-            # Chuyển timestamp sang str trước khi backup
             df_copy["timestamp"] = df_copy["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S")
             data = df_copy.set_index("timestamp").to_dict(orient="index")
         data["_last_backup"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -45,30 +84,9 @@ def backup_firebase(df):
     except Exception as e:
         print("⚠️ Lỗi backup:", e)
 
-# ==== Lấy dữ liệu từ Firebase ====
-def get_firebase_data():
-    try:
-        r = requests.get(FIREBASE_URL, timeout=10)
-        data = r.json()
-        if not data:
-            return pd.DataFrame()
-        rows = []
-        for key, val in data.items():
-            if key == "_last_backup":
-                continue
-            row = val.copy()
-            row["timestamp"] = datetime.strptime(val["time"], "%Y-%m-%d %H:%M:%S")
-            rows.append(row)
-        df = pd.DataFrame(rows)
-        df.sort_values("timestamp", inplace=True)
-        df.reset_index(drop=True, inplace=True)
-        return df
-    except Exception as e:
-        print("⚠️ Firebase error:", e)
-        return pd.DataFrame()
 
-# ==== Phát hiện bất thường ====
-def detect_anomaly(df):
+# ==== Phát hiện bất thường bằng ECOD + ngưỡng cố định ====
+def detect_anomaly(df: pd.DataFrame):
     if df.shape[0] < 10:
         return [], None
     features = ["temp", "humi", "co", "nh3", "dust"]
@@ -79,29 +97,25 @@ def detect_anomaly(df):
     latest = df.iloc[-1]
     anomalies = []
 
-    # Ngưỡng cố định
     if latest["temp"] > THRESHOLDS["temp"]:
-        anomalies.append(f"TEMP HIGH: {latest['temp']}°C")
+        anomalies.append(f"TEMP HIGH: {latest['temp']:.2f}°C")
     if latest["humi"] < THRESHOLDS["humi_low"] or latest["humi"] > THRESHOLDS["humi_high"]:
-        anomalies.append(f"HUMI ABNORMAL: {latest['humi']}%")
+        anomalies.append(f"HUMI ABNORMAL: {latest['humi']:.2f}%")
     if latest["co"] > THRESHOLDS["co"]:
-        anomalies.append(f"CO HIGH: {latest['co']} ppm")
+        anomalies.append(f"CO HIGH: {latest['co']:.2f} ppm")
     if latest["nh3"] > THRESHOLDS["nh3"]:
-        anomalies.append(f"NH3 HIGH: {latest['nh3']} ppm")
+        anomalies.append(f"NH3 HIGH: {latest['nh3']:.2f} ppm")
     if latest["dust"] > THRESHOLDS["dust"]:
-        anomalies.append(f"DUST HIGH: {latest['dust']} µg/m3")
-
-    # Kiểm tra ECOD
+        anomalies.append(f"DUST HIGH: {latest['dust']:.2f} µg/m3")
     if is_anomaly == 1:
         anomalies.append("Anomaly detected by ECOD (multivariate)")
 
     return anomalies, latest
 
-# ==== Dự báo 1-6 giờ + xu hướng ====
-def forecast_with_trend(df, col):
+
+# ==== Dự báo 1-6 giờ + xu hướng bằng Prophet ====
+def forecast_with_trend(df: pd.DataFrame, col: str):
     df_prophet = df[["timestamp", col]].rename(columns={"timestamp": "ds", col: "y"})
-    
-    # === Log-transform để ổn định mô hình Prophet ===
     df_prophet["y"] = np.log(df_prophet["y"] + 1)
 
     model = Prophet(
@@ -110,78 +124,80 @@ def forecast_with_trend(df, col):
         yearly_seasonality=False
     )
     model.fit(df_prophet)
-
-    future = model.make_future_dataframe(periods=6, freq='h')
+    future = model.make_future_dataframe(periods=6, freq="h")
     fc_raw = model.predict(future)
-
-    # === Chuyển dự báo về giá trị thực ===
-    fc_raw["yhat"] = np.exp(fc_raw["yhat"]) - 1
-    fc_raw["yhat"] = fc_raw["yhat"].abs()  
+    fc_raw["yhat"] = (np.exp(fc_raw["yhat"]) - 1).abs()
     fc = fc_raw[["ds", "yhat"]].tail(6)
 
-    # Nhận xét xu hướng
     if fc["yhat"].iloc[-1] > fc["yhat"].iloc[0]:
         trend = "↑ increasing"
     elif fc["yhat"].iloc[-1] < fc["yhat"].iloc[0]:
         trend = "↓ decreasing"
     else:
         trend = "→ stable"
-
     return fc, trend
 
 
-# ==== Gửi alert tới ESP32 ====
+# ==== Gửi alert tới ESP32 qua HTTP ====
 def send_alert(anomalies, latest):
     try:
+        ts = latest["timestamp"].strftime("%Y-%m-%d %H:%M:%S") \
+            if hasattr(latest["timestamp"], "strftime") else str(latest["timestamp"])
         payload = {
             "type": "anomaly",
-            "time": latest["time"],
+            "time": ts,
             "anomalies": anomalies,
             "row": {
-                "temp": latest["temp"],
-                "humi": latest["humi"],
-                "co": latest["co"],
-                "nh3": latest["nh3"],
-                "dust": latest["dust"]
+                "temp": float(latest["temp"]),
+                "humi": float(latest["humi"]),
+                "co":   float(latest["co"]),
+                "nh3":  float(latest["nh3"]),
+                "dust": float(latest["dust"]),
             }
         }
         r = requests.post(ESP32_HTTP, json=payload, timeout=5)
         print("📤 Sent alert to ESP32:", r.status_code)
     except Exception as e:
-        print("⚠️ HTTP error:", e)
+        print("⚠️ HTTP send_alert error:", e)
+
 
 # ==== Main loop ====
 def main():
+    print(f"🚀 Air-data monitor started — InfluxDB: {INFLUX_URL}, bucket: {INFLUX_BUCKET}")
     while True:
-        df = get_firebase_data()
-        backup_firebase(df)
+        df = get_influx_data(hours=24)
+        backup_data(df)
 
         if df.empty:
-            print("ℹ️ No data yet.")
+            print("ℹ️ Chưa có dữ liệu trong InfluxDB.")
             time.sleep(POLL_INTERVAL)
             continue
 
+        print(f"📊 Tổng {len(df)} bản ghi. Mới nhất: {df.iloc[-1]['timestamp']}")
+
         anomalies, latest_row = detect_anomaly(df)
         if anomalies:
-            print(f"⚠️ Anomalies detected at {latest_row['time']}:")
+            ts = latest_row["timestamp"].strftime("%Y-%m-%d %H:%M:%S")
+            print(f"⚠️ Anomalies detected at {ts}:")
             for a in anomalies:
                 print(" -", a)
             send_alert(anomalies, latest_row)
         else:
-            print(f"✅ Data normal at {latest_row['time']}")
+            print(f"✅ Dữ liệu bình thường.")
 
         # Forecast + trend
         for col in ["temp", "humi", "co", "nh3", "dust"]:
             try:
                 fc, trend = forecast_with_trend(df, col)
-                print(f"📈 Forecast for {col} (next 6h, trend: {trend}):")
+                print(f"📈 Forecast {col} (6h tới, trend: {trend}):")
                 for t, y in zip(fc["ds"], fc["yhat"]):
                     print(f"   {t.strftime('%H:%M')} → {y:.2f}")
             except Exception as e:
                 print(f"⚠️ Forecast error for {col}:", e)
 
-        print(f"⏳ Waiting {POLL_INTERVAL//60} min...\n")
+        print(f"⏳ Chờ {POLL_INTERVAL // 60} phút...\n")
         time.sleep(POLL_INTERVAL)
+
 
 if __name__ == "__main__":
     main()

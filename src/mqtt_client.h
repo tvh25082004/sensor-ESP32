@@ -1,14 +1,16 @@
-#ifndef FIREBASE_H
-#define FIREBASE_H
+#ifndef MQTT_CLIENT_H
+#define MQTT_CLIENT_H
 
 #include <Arduino.h>
+#include <PubSubClient.h>
 
-// Biến thời gian gửi dữ liệu
 extern unsigned long lastSend;
 extern const unsigned long SEND_INTERVAL;
 extern bool firstSendDone;
 
-// Khai báo hàm
-void sendToFirebase();
+void MQTT_init();
+void MQTT_reconnect();
+void MQTT_publish();
 String getTimestamp();
+
 #endif

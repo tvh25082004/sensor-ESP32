@@ -6,7 +6,6 @@
 #include <Preferences.h>
 #include "time.h"
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
 
 // ===== Các khai báo giữ nguyên =====
 extern const char *ntpServer;

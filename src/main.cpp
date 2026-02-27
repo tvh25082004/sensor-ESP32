@@ -2,14 +2,14 @@
 #include "WiFi_Config.h"
 #include "sensor.h"
 #include "display.h"
-#include "firebase.h"
+#include "mqtt_client.h"
 
-// ==== Setup ====
 void setup()
 {
   Serial.begin(9600);
   Wifi_init();
   AI_Start();
+  MQTT_init();
   MQ135_Init();
   MQ7_Init();
   GP2Y_setup();
@@ -17,7 +17,6 @@ void setup()
   TFT_init();
 }
 
-// ==== Loop ====
 void loop()
 {
   if (isWifiConnected())
@@ -30,7 +29,7 @@ void loop()
     MQ7_run();
     dust = Run_GP2Y();
     drawScreen();
-    sendToFirebase();
+    MQTT_publish();
     lastSend = millis();
     firstSendDone = true;
   }

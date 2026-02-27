@@ -6,8 +6,8 @@ const long gmtOffset_sec = 7 * 3600;
 const int daylightOffset_sec = 0;
 
 // ==== WiFi mặc định ====
-const char *ssid = "Open WorkShop 2.4GH";
-const char *password = "0000*0000";
+const char *ssid = "PTIT_WIFI";
+const char *password = "";
 
 // Access Point
 const char *apSSID = "ESP32_Config";
