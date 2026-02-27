@@ -1,4 +1,4 @@
-.PHONY: firmware ai run
+.PHONY: firmware ai run clean help
 
 # Build firmware ESP32 (PlatformIO, không upload)
 firmware:
@@ -11,3 +11,16 @@ ai:
 # Chạy full: build firmware + chạy AI
 run: firmware ai
 
+# Dọn dẹp build + file sinh ra
+clean:
+	-platformio run -t clean
+	rm -rf air_outputs
+	rm -f backup*.json
+
+# Hiển thị hướng dẫn lệnh make
+help:
+	@echo "Targets khả dụng:"
+	@echo "  make firmware  - Build firmware ESP32 (PlatformIO)"
+	@echo "  make ai        - Chạy service AI Python với .env"
+	@echo "  make run       - Build firmware + chạy AI"
+	@echo "  make clean     - Dọn dẹp build và file sinh ra"
