@@ -1,4 +1,4 @@
-.PHONY: firmware ai run clean help
+.PHONY: firmware ai run clean push help
 
 # Build firmware ESP32 (PlatformIO, không upload)
 firmware:
@@ -17,6 +17,11 @@ clean:
 	rm -rf air_outputs
 	rm -f backup*.json
 
+# Push code lên git và in nội dung commit cuối cùng
+push:
+	git push
+	@git log -1 --pretty=full
+
 # Hiển thị hướng dẫn lệnh make
 help:
 	@echo "Targets khả dụng:"
@@ -24,3 +29,4 @@ help:
 	@echo "  make ai        - Chạy service AI Python với .env"
 	@echo "  make run       - Build firmware + chạy AI"
 	@echo "  make clean     - Dọn dẹp build và file sinh ra"
+	@echo "  make push      - Git push và in nội dung commit cuối"
