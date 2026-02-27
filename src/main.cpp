@@ -20,9 +20,9 @@ void setup()
 // ==== Loop ====
 void loop()
 {
-  server.handleClient(); 
+  if (isWifiConnected())
+    server.handleClient();
 
-  // Gửi dữ liệu định kỳ
   if (!firstSendDone || millis() - lastSend > SEND_INTERVAL)
   {
     DHT22_run();
@@ -34,5 +34,5 @@ void loop()
     lastSend = millis();
     firstSendDone = true;
   }
-  delay(100); // delay ngắn để tránh chiếm CPU quá nhiều
+  delay(100);
 }

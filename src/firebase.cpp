@@ -1,7 +1,8 @@
 #include "firebase.h"
+#include <WiFi.h>
 #include <HTTPClient.h>
 #include "time.h"
-#include "sensor.h" // để lấy temp, humi, co_ppm, nh3_ppm, dust
+#include "sensor.h"
 
 // ==== Firebase ====
 const char *firebase_host =

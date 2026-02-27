@@ -32,5 +32,6 @@ void handleSave();
 void startConfigPortal();
 void Wifi_init();
 void AI_Start();
+bool isWifiConnected();
 
 #endif

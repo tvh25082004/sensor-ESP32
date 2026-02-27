@@ -141,7 +141,7 @@ void AI_Start()
       return;
     }
 
-    StaticJsonDocument<512> doc;
+    JsonDocument doc;
     if (deserializeJson(doc, server.arg("plain")))
     {
       server.send(400, "text/plain", "JSON Error");
