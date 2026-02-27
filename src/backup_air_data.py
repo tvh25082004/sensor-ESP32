@@ -1,17 +1,22 @@
-import requests
-import pandas as pd
-from datetime import datetime
-import time
 import json
+import os
+import time
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+import requests
 from prophet import Prophet
 from pyod.models.ecod import ECOD
-import numpy as np
 
-# ==== Cấu hình ====
-FIREBASE_URL = "https://nckh-clkk-default-rtdb.asia-southeast1.firebasedatabase.app/sensor_data.json"
-ESP32_HTTP = "http://192.168.1.17/alert"  # Thay bằng IP ESP32 thực tế
-BACKUP_FILE = "backup.json"
-POLL_INTERVAL = 600  # 10 phút
+# ==== Cấu hình (lấy từ biến môi trường, có default) ====
+FIREBASE_URL = os.getenv(
+    "FIREBASE_URL",
+    "https://nckh-clkk-default-rtdb.asia-southeast1.firebasedatabase.app/sensor_data.json",
+)
+ESP32_HTTP = os.getenv("ESP32_HTTP", "http://192.168.1.17/alert")  # IP ESP32 thực tế
+BACKUP_FILE = os.getenv("BACKUP_FILE", "backup.json")
+POLL_INTERVAL = int(os.getenv("POLL_INTERVAL", "600"))  # giây, mặc định 10 phút
 
 # ==== Ngưỡng cảnh báo ====
 THRESHOLDS = {

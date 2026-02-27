@@ -20,6 +20,9 @@ backup*.json
 # Air outputs (generated)
 air_outputs/
 
+# Env (secrets/local config)
+.env
+
 # OS
 .DS_Store
 Thumbs.db
