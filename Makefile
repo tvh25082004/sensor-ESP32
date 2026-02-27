@@ -2,7 +2,7 @@
 
 # Build firmware ESP32 (PlatformIO, không upload)
 firmware:
-	platformio run
+	python -m platformio run
 
 # Chạy service AI Python với config từ .env
 ai:
@@ -13,7 +13,7 @@ run: firmware ai
 
 # Dọn dẹp build + file sinh ra
 clean:
-	-platformio run -t clean
+	-python -m platformio run -t clean
 	rm -rf air_outputs
 	rm -f backup*.json
 

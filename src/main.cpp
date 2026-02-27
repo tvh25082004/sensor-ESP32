@@ -1,5 +1,5 @@
 
-#include "Wifi_Config.h"
+#include "WiFi_Config.h"
 #include "sensor.h"
 #include "display.h"
 #include "firebase.h"
