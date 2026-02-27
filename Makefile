@@ -17,10 +17,13 @@ clean:
 	rm -rf air_outputs
 	rm -f backup*.json
 
-# Push code lên git và in nội dung commit cuối cùng
+# Add + Commit (nhập message) + Push và in nội dung commit cuối cùng
 push:
-	git push
-	@git log -1 --pretty=full
+	git add .
+	@read -p "Nhập nội dung commit: " msg; \
+	git commit -m "$$msg"; \
+	git push; \
+	git log -1 --pretty=full
 
 # Hiển thị hướng dẫn lệnh make
 help:
